@@ -192,5 +192,51 @@ class TestCIPlatforms(unittest.TestCase):
         self.assertIn("ci_platforms", p.reasons())
 
 
+class TestDeclaredFacts(unittest.TestCase):
+    def test_declared_command_output_is_recorded(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            "launchrepo.toml": (
+                '[facts.greeting]\n'
+                'command = "echo hello"\n'
+                'description = "a greeting"\n'
+            ),
+        })
+        p = profile_mod.extract(repo)
+        self.assertEqual(p.value("greeting"), "hello")
+        self.assertIn("echo hello", p.source("greeting"))
+
+    def test_numeric_output_becomes_int(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            "launchrepo.toml": (
+                '[facts.browsers_supported]\n'
+                'command = "echo 11"\n'
+                'description = "browsers this project supports"\n'
+            ),
+        })
+        p = profile_mod.extract(repo)
+        self.assertEqual(p.value("browsers_supported"), 11)
+        self.assertIsInstance(p.value("browsers_supported"), int)
+
+    def test_nonzero_exit_is_unavailable_with_exit_code_in_reason(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            "launchrepo.toml": (
+                '[facts.broken]\n'
+                'command = "exit 3"\n'
+                'description = "always fails"\n'
+            ),
+        })
+        p = profile_mod.extract(repo)
+        self.assertIsNone(p.value("broken"))
+        self.assertIn("3", p.reasons()["broken"])
+
+    def test_missing_launchrepo_toml_is_not_an_error(self):
+        repo = make_repo()
+        p = profile_mod.extract(repo)  # should not raise
+        self.assertIsNone(p.value("greeting"))
+
+
 if __name__ == "__main__":
     unittest.main()

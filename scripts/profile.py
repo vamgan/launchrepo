@@ -16,6 +16,7 @@ import subprocess
 from facts import Profile
 
 GIT_TIMEOUT = 5
+DECLARED_FACT_TIMEOUT = 30
 
 LICENSE_FILENAMES = (
     "LICENSE",
@@ -303,6 +304,87 @@ def _extract_history(repo, profile):
         )
 
 
+# A tiny, deliberately narrow reader for launchrepo.toml. tomllib only
+# ships in Python 3.11+ and this must run on 3.10, and general TOML has
+# far more shape than we need -- we only ever expect `[facts.NAME]`
+# tables containing `key = "quoted string"` lines, so that's all this
+# parses. Anything outside that shape (nested tables, arrays, bare
+# numbers/booleans, multi-line strings) is simply not recognised.
+_FACT_TABLE_RE = re.compile(r"^\[facts\.([A-Za-z0-9_\-]+)\]$")
+_FACT_KV_RE = re.compile(r'^([A-Za-z0-9_\-]+)\s*=\s*"((?:[^"\\]|\\.)*)"$')
+
+
+def _parse_launchrepo_toml(text):
+    declared = {}
+    current = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        table_match = _FACT_TABLE_RE.match(line)
+        if table_match:
+            current = table_match.group(1)
+            declared.setdefault(current, {})
+            continue
+        kv_match = _FACT_KV_RE.match(line)
+        if kv_match and current is not None:
+            key, raw_value = kv_match.groups()
+            declared[current][key] = raw_value.replace('\\"', '"').replace("\\\\", "\\")
+    return declared
+
+
+_INT_RE = re.compile(r"^-?\d+$")
+
+
+def _coerce_declared_value(output):
+    if _INT_RE.match(output):
+        return int(output)
+    return output
+
+
+def _extract_declared_facts(repo, profile):
+    toml_path = os.path.join(repo, "launchrepo.toml")
+    if not os.path.isfile(toml_path):
+        return
+
+    try:
+        with open(toml_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return
+
+    for name, table in _parse_launchrepo_toml(text).items():
+        command = table.get("command")
+        if not command:
+            profile.unavailable(name, "launchrepo.toml [facts.%s] has no command" % name)
+            continue
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                timeout=DECLARED_FACT_TIMEOUT,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            profile.unavailable(name, f"command `{command}` could not be run: {exc}")
+            continue
+
+        if result.returncode != 0:
+            profile.unavailable(
+                name, f"command `{command}` exited {result.returncode}"
+            )
+            continue
+
+        profile.record(
+            name,
+            _coerce_declared_value(result.stdout.strip()),
+            f"launchrepo.toml [facts.{name}] command `{command}`",
+        )
+
+
 def extract(repo):
     if not os.path.isdir(os.path.join(repo, ".git")):
         raise SystemExit(f"not a git repository: {repo}")
@@ -313,4 +395,7 @@ def extract(repo):
     _extract_language(repo, profile)
     _extract_history(repo, profile)
     _extract_ci_platforms(repo, profile)
+    # Declared facts run last so a repository's own launchrepo.toml can
+    # override anything generic extraction produced above.
+    _extract_declared_facts(repo, profile)
     return profile
