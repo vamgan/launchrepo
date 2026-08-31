@@ -9,6 +9,12 @@ class TestFact(unittest.TestCase):
         self.assertEqual(f.value, 11)
         self.assertEqual(f.source, "scripts/platforms.py count")
 
+    def test_a_fact_without_a_source_is_rejected(self):
+        with self.assertRaises(ValueError):
+            facts.Fact(11, "")
+        with self.assertRaises(ValueError):
+            facts.Fact(11, None)
+
 
 class TestProfile(unittest.TestCase):
     def test_records_and_returns_a_fact(self):
