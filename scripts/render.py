@@ -16,6 +16,11 @@ import html
 import os
 import re
 import shutil
+import subprocess
+import tempfile
+
+CHROME_TIMEOUT = 60
+VIRTUAL_TIME_BUDGET_MS = 4000
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
@@ -97,3 +102,87 @@ def find_chrome(explicit=None, candidates=None):
             return found
 
     return None
+
+
+class RenderResult:
+    """Outcome of one `render()` call.
+
+    `render()` never raises for a Chrome-side problem (missing binary,
+    timeout, crash, or a run that produced no file) -- copy generation
+    has to keep working on machines without a browser, so those
+    failures come back as `ok=False` with a human-readable `reason`
+    instead. The one thing that still raises is an unprovable
+    placeholder from `fill()`, since that is a template/profile bug,
+    not an environment limitation.
+    """
+
+    __slots__ = ("ok", "path", "reason")
+
+    def __init__(self, ok, path, reason=None):
+        self.ok = ok
+        self.path = path
+        self.reason = reason
+
+    def __repr__(self):
+        return f"RenderResult(ok={self.ok!r}, path={self.path!r}, reason={self.reason!r})"
+
+
+def render(template_path, profile, out_path, width, height, extras=None, scale=2, chrome=None):
+    """Fill a template and screenshot it with headless Chrome.
+
+    Substitution happens first: an unknown or unprovable placeholder
+    raises SystemExit here, before any browser is located or started,
+    so that failure is cheap. Everything after that point -- a missing
+    Chrome, a timeout, a crash, or a run that leaves no file behind --
+    is reported through the returned RenderResult rather than raised.
+    """
+    with open(template_path, "r", encoding="utf-8") as fh:
+        template = fh.read()
+
+    filled = fill(template, profile, extras)
+
+    chrome_path = find_chrome(explicit=chrome)
+    if not chrome_path:
+        return RenderResult(
+            False,
+            None,
+            "chrome not found: pass --chrome, set $CHROME, or install headless Chrome",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        html_path = os.path.join(tmp, "render.html")
+        with open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(filled)
+        file_url = "file://" + os.path.abspath(html_path)
+
+        command = [
+            chrome_path,
+            "--headless",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            f"--force-device-scale-factor={scale}",
+            f"--window-size={width},{height}",
+            f"--screenshot={out_path}",
+            f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}",
+            file_url,
+        ]
+
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                timeout=CHROME_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return RenderResult(False, None, f"chrome timed out after {CHROME_TIMEOUT}s")
+        except OSError as exc:
+            return RenderResult(False, None, f"chrome could not be run: {exc}")
+
+    if not os.path.isfile(out_path):
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        reason = "chrome produced no output file"
+        if stderr:
+            reason += f": {stderr}"
+        return RenderResult(False, None, reason)
+
+    return RenderResult(True, out_path, None)
