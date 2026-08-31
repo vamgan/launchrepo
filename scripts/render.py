@@ -13,9 +13,27 @@ that have no browser at all.
 """
 
 import html
+import os
 import re
+import shutil
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+
+# Candidates covering the common install locations for Chrome/Chromium
+# across platforms. Bare names (no path separator) are resolved with
+# `shutil.which` against $PATH; entries containing a path separator are
+# checked directly with os.access, since `which` only ever resolves
+# names on $PATH. Order matters: the macOS app bundle path comes first
+# because it's the most common source on a developer's own machine.
+_DEFAULT_CANDIDATES = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+)
 
 
 def fill(template, profile, extras=None):
@@ -48,3 +66,34 @@ def fill(template, profile, extras=None):
         return html.escape(str(value))
 
     return _PLACEHOLDER_RE.sub(replace, template)
+
+
+def find_chrome(explicit=None, candidates=None):
+    """Locate a Chrome/Chromium binary to drive headlessly.
+
+    Precedence: an explicit path always wins (the caller knows best),
+    then `$CHROME` (the conventional escape hatch for CI and unusual
+    installs), then the first working entry from `candidates` (default:
+    `_DEFAULT_CANDIDATES`). Returns None -- never raises -- when nothing
+    is found, so callers can degrade instead of crashing.
+    """
+    if explicit:
+        return explicit
+
+    env_chrome = os.environ.get("CHROME")
+    if env_chrome:
+        return env_chrome
+
+    if candidates is None:
+        candidates = _DEFAULT_CANDIDATES
+
+    for candidate in candidates:
+        if os.sep in candidate or (os.altsep and os.altsep in candidate):
+            if os.access(candidate, os.X_OK):
+                return candidate
+            continue
+        found = shutil.which(candidate)
+        if found:
+            return found
+
+    return None
