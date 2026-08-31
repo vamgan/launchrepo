@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg-0: #0b0d10;
+    --bg-1: #12151a;
+    --line: rgba(255, 255, 255, 0.08);
+    --text-0: #f2f4f7;
+    --text-1: #9aa4b2;
+    --accent: #5eead4;
+    --accent-dim: rgba(94, 234, 212, 0.16);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1600px;
+    height: 400px;
+    overflow: hidden;
+    background: var(--bg-0);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+  }
+
+  .stage {
+    position: relative;
+    width: 1600px;
+    height: 400px;
+    background:
+      radial-gradient(720px 420px at 88% 8%, var(--accent-dim), transparent 60%),
+      linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  }
+
+  .grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: linear-gradient(180deg, black, transparent 85%);
+    mask-image: linear-gradient(180deg, black, transparent 85%);
+    opacity: 0.5;
+  }
+
+  .row {
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 88px;
+    gap: 64px;
+  }
+
+  .left {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-width: 0;
+  }
+
+  .mark {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 6px var(--accent-dim), 0 0 24px 4px rgba(94, 234, 212, 0.45);
+    flex: none;
+  }
+
+  .name {
+    font-size: 84px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-0);
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .tagline {
+    font-size: 30px;
+    font-weight: 400;
+    color: var(--text-1);
+    max-width: 760px;
+    line-height: 1.35;
+  }
+
+  .right {
+    flex: none;
+  }
+
+  .terminal {
+    width: 480px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--line);
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(6px);
+    overflow: hidden;
+  }
+
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .terminal-bar span {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .terminal-body {
+    padding: 26px 22px 30px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 21px;
+    color: var(--text-0);
+  }
+
+  .prompt {
+    color: var(--accent);
+    margin-right: 10px;
+  }
+
+  .cmd {
+    word-break: break-word;
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="grid"></div>
+    <div class="row">
+      <div class="left">
+        <div class="mark">
+          <div class="dot"></div>
+          <div class="name">{{name}}</div>
+        </div>
+        <div class="tagline">{{tagline}}</div>
+      </div>
+      <div class="right">
+        <div class="terminal">
+          <div class="terminal-bar">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="terminal-body">
+            <span class="prompt">$</span><span class="cmd">{{install}}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
