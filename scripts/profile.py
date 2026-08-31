@@ -208,13 +208,20 @@ def _parse_yaml_flow_list(inner):
     return items if items else None
 
 
-def _read_ci_platforms_from_file(path):
-    """Return (platform_list_or_None, failure_reason_or_None) for one workflow file."""
+def _scan_os_matrix(path):
+    """Look for a `strategy: matrix: os:` line in one workflow file.
+
+    Returns (items, reason). `items` is a parsed list only when an `os:`
+    line was found and confidently parsed. `reason` is set only when an
+    `os:` line was present but NOT confidently parsable -- distinct from
+    no `os:` line being present at all, so the caller can tell "there is
+    no matrix here" from "there is a matrix here we can't trust."
+    """
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as fh:
             lines = fh.readlines()
-    except OSError as exc:
-        return None, f"could not read file: {exc}"
+    except OSError:
+        return None, None
 
     for line in lines:
         stripped = line.strip()
@@ -226,6 +233,20 @@ def _read_ci_platforms_from_file(path):
             if items:
                 return items, None
         return None, f"could not confidently parse `{stripped}`"
+    return None, None
+
+
+def _scan_runs_on(path):
+    """Look for a plain `runs-on: value` line in one workflow file.
+
+    A `${{ ... }}` value is a reference to a matrix variable, not a
+    literal platform, so it is skipped rather than treated as a hit.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return None, None
 
     for line in lines:
         stripped = line.strip()
@@ -233,13 +254,11 @@ def _read_ci_platforms_from_file(path):
             continue
         value = stripped[len("runs-on:"):].strip()
         if value.startswith("${{"):
-            # A reference to a matrix variable, not a literal platform.
             continue
         if _YAML_SCALAR_RE.match(value):
             return [value], None
         return None, f"could not confidently parse `{stripped}`"
-
-    return None, "no os matrix or runs-on found"
+    return None, None
 
 
 def _extract_ci_platforms(repo, profile):
@@ -257,20 +276,35 @@ def _extract_ci_platforms(repo, profile):
         )
         return
 
-    first_failure = None
+    # An explicit `os:` matrix is checked across every file before any
+    # bare `runs-on:` is considered, so a single-job `runs-on:
+    # ubuntu-latest` in one file (e.g. a docs-deploy workflow that
+    # happens to sort first) can never eclipse a real multi-platform
+    # matrix declared in another file.
+    matrix_failure = None
     for filename in workflow_files:
-        items, reason = _read_ci_platforms_from_file(
-            os.path.join(workflows_dir, filename)
-        )
+        items, reason = _scan_os_matrix(os.path.join(workflows_dir, filename))
         if items:
-            profile.record(
-                "ci_platforms", items, f".github/workflows/{filename}"
-            )
+            profile.record("ci_platforms", items, f".github/workflows/{filename}")
             return
-        if reason and first_failure is None:
-            first_failure = f"{filename}: {reason}"
+        if reason and matrix_failure is None:
+            matrix_failure = f"{filename}: {reason}"
 
-    profile.unavailable("ci_platforms", first_failure)
+    if matrix_failure:
+        # A matrix was declared somewhere but couldn't be trusted -- stay
+        # unavailable rather than quietly falling back to a weaker signal.
+        profile.unavailable("ci_platforms", matrix_failure)
+        return
+
+    for filename in workflow_files:
+        items, reason = _scan_runs_on(os.path.join(workflows_dir, filename))
+        if items:
+            profile.record("ci_platforms", items, f".github/workflows/{filename}")
+            return
+
+    profile.unavailable(
+        "ci_platforms", "no os matrix or runs-on found in workflow files"
+    )
 
 
 def _extract_history(repo, profile):
@@ -358,7 +392,7 @@ def _extract_declared_facts(repo, profile):
     for name, table in _parse_launchrepo_toml(text).items():
         command = table.get("command")
         if not command:
-            profile.unavailable(name, "launchrepo.toml [facts.%s] has no command" % name)
+            profile.unavailable(name, f"launchrepo.toml [facts.{name}] has no command")
             continue
 
         try:
