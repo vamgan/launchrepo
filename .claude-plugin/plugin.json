@@ -1,0 +1,10 @@
+{
+  "name": "launchrepo",
+  "description": "Generate a launch kit for any GitHub repo: banner, social card, README, landing page, and platform-ready launch copy, with every factual claim verified against the repo itself.",
+  "version": "0.1.0",
+  "author": { "name": "Vamil Gandhi" },
+  "homepage": "https://github.com/vamgan/launchrepo",
+  "repository": "https://github.com/vamgan/launchrepo",
+  "license": "MIT",
+  "keywords": ["launch", "marketing", "readme", "open-source", "release"]
+}
