@@ -45,6 +45,13 @@ class TestProfile(unittest.TestCase):
         self.assertEqual(out["facts"]["name"], {"value": "declutter", "source": "git remote"})
         self.assertEqual(out["unavailable"]["tests"], "no test command declared")
 
+    def test_keys_returns_only_provable_facts(self):
+        p = facts.Profile()
+        p.record("name", "declutter", "git remote")
+        p.unavailable("tests", "no test command declared")
+        self.assertIn("name", p.keys())
+        self.assertNotIn("tests", p.keys())
+
 
 if __name__ == "__main__":
     unittest.main()

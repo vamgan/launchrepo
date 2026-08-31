@@ -62,7 +62,15 @@ class Profile:
         return fact.source if fact is not None else None
 
     def keys(self):
-        return set(self._facts) | set(self._unavailable)
+        """Keys with a provable fact.
+
+        Deliberately excludes unavailable keys: a caller may rely on
+        what the profile can prove and nothing more, so iterating
+        keys() and calling value() on each should never produce a
+        silent None. Unavailable keys, and why they're unavailable,
+        live in reasons() instead.
+        """
+        return set(self._facts)
 
     def reasons(self):
         return dict(self._unavailable)
