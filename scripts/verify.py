@@ -115,3 +115,131 @@ def find_claims(text):
     for sentence in _split_sentences(text):
         claims.extend(_find_numeric_claims(sentence))
     return claims
+
+
+class Finding:
+    """One classified claim: what was said, where, and (if wrong) why."""
+
+    __slots__ = ("value", "context", "conflicts_with", "fact_value", "source")
+
+    def __init__(self, value, context, conflicts_with=None, fact_value=None, source=None):
+        self.value = value
+        self.context = context
+        self.conflicts_with = conflicts_with
+        self.fact_value = fact_value
+        self.source = source
+
+    def as_dict(self):
+        result = {"value": self.value, "context": self.context}
+        if self.conflicts_with is not None:
+            result["conflicts_with"] = self.conflicts_with
+            result["fact_value"] = self.fact_value
+            result["source"] = self.source
+        return result
+
+
+class Report:
+    """The outcome of checking copy against a profile.
+
+    `ok` is false only when something is contradicted -- an unprovable
+    claim is not a failure, it is simply a claim the profile cannot
+    speak to.
+    """
+
+    def __init__(self):
+        self.proven = []
+        self.contradicted = []
+        self.unprovable = []
+
+    @property
+    def ok(self):
+        return not self.contradicted
+
+    def as_dict(self):
+        return {
+            "ok": self.ok,
+            "proven": [f.as_dict() for f in self.proven],
+            "contradicted": [f.as_dict() for f in self.contradicted],
+            "unprovable": [f.as_dict() for f in self.unprovable],
+        }
+
+
+def _clause_at(sentence, span):
+    """The comma/semicolon-delimited clause of `sentence` containing `span`.
+
+    "Ten browsers, one markdown file." is two independent claims joined
+    by a comma. Scoping subject-overlap detection to the claim's own
+    clause -- rather than the whole sentence -- keeps "one" from being
+    judged against the browsers fact just because "browsers" appears
+    earlier in the same sentence.
+    """
+    if span is None:
+        return sentence
+    start = span[0]
+    bounds = [0] + [m.end() for m in re.finditer(r"[,;]", sentence)] + [len(sentence) + 1]
+    for lo, hi in zip(bounds, bounds[1:]):
+        if lo <= start < hi:
+            return sentence[lo:hi]
+    return sentence
+
+
+def _expected_value(fact_value):
+    """What a number would have to equal to match this fact, or None."""
+    if isinstance(fact_value, bool):
+        return None
+    if isinstance(fact_value, int):
+        return fact_value
+    if isinstance(fact_value, list):
+        return len(fact_value)
+    return None
+
+
+def _find_conflicting_fact(claim, facts):
+    """A fact whose subject this claim's clause is about, but disagrees with.
+
+    Subject overlap is detected by splitting the fact's key on
+    underscores: if any of those words appears in the claim's clause
+    while the claim's value differs from that fact, the claim is
+    contradicted. A coincidental value match to some unrelated fact
+    never overrides a genuine, disagreeing subject match -- callers
+    should check this before falling back to a bare value-membership
+    test for "proven".
+    """
+    clause_words = set(re.findall(r"[a-z0-9]+", _clause_at(claim.context, claim.span).lower()))
+    for key, fact in facts.items():
+        expected = _expected_value(fact["value"])
+        if expected is None:
+            continue
+        fact_words = set(key.lower().split("_"))
+        if fact_words & clause_words and claim.value != expected:
+            return key, fact
+    return None
+
+
+def check(text, profile):
+    """Classify every claim in `text` against `profile`'s facts."""
+    facts = profile.get("facts", {})
+    report = Report()
+
+    match_values = {
+        _expected_value(fact["value"])
+        for fact in facts.values()
+        if _expected_value(fact["value"]) is not None
+    }
+
+    for claim in find_claims(text):
+        conflict = _find_conflicting_fact(claim, facts)
+        if conflict is not None:
+            key, fact = conflict
+            report.contradicted.append(
+                Finding(
+                    claim.value, claim.context,
+                    conflicts_with=key, fact_value=fact["value"], source=fact["source"],
+                )
+            )
+        elif claim.value in match_values:
+            report.proven.append(Finding(claim.value, claim.context))
+        else:
+            report.unprovable.append(Finding(claim.value, claim.context))
+
+    return report
