@@ -12,11 +12,14 @@ copy generation (and thus `fill()`) has to keep working on machines
 that have no browser at all.
 """
 
+import argparse
 import html
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 CHROME_TIMEOUT = 60
@@ -186,3 +189,72 @@ def render(template_path, profile, out_path, width, height, extras=None, scale=2
         return RenderResult(False, None, reason)
 
     return RenderResult(True, out_path, None)
+
+
+def _parse_set(raw):
+    """Parse one `--set KEY=VALUE` argument.
+
+    Raised as ArgumentTypeError so argparse reports it the same way as
+    any other malformed argument -- a usage message and a non-zero
+    exit, not a traceback.
+    """
+    key, sep, value = raw.partition("=")
+    if not sep or not key:
+        raise argparse.ArgumentTypeError(
+            f"invalid --set value {raw!r}: expected KEY=VALUE"
+        )
+    return key, value
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Render a marketing image from an HTML template and a fact profile."
+    )
+    parser.add_argument("template", help="path to the HTML template")
+    parser.add_argument(
+        "--profile", required=True, metavar="PATH", help="path to a profile JSON file"
+    )
+    parser.add_argument("--out", required=True, metavar="PATH", help="output image path")
+    parser.add_argument("--width", required=True, type=int, help="viewport width in pixels")
+    parser.add_argument("--height", required=True, type=int, help="viewport height in pixels")
+    parser.add_argument(
+        "--scale", type=int, default=2, help="device scale factor (default: 2)"
+    )
+    parser.add_argument("--chrome", metavar="PATH", help="explicit path to a Chrome binary")
+    parser.add_argument(
+        "--set",
+        dest="extras",
+        metavar="KEY=VALUE",
+        action="append",
+        default=[],
+        type=_parse_set,
+        help="a value the profile cannot prove, e.g. --set tagline='...'",
+    )
+    args = parser.parse_args(argv)
+
+    with open(args.profile, "r", encoding="utf-8") as fh:
+        profile = json.load(fh)
+
+    extras = dict(args.extras)
+
+    result = render(
+        args.template,
+        profile,
+        args.out,
+        args.width,
+        args.height,
+        extras=extras,
+        scale=args.scale,
+        chrome=args.chrome,
+    )
+
+    if not result.ok:
+        print(result.reason, file=sys.stderr)
+        return 1
+
+    print(result.path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
