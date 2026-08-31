@@ -19,6 +19,8 @@ class Fact:
     __slots__ = ("value", "source")
 
     def __init__(self, value, source):
+        if not source:
+            raise ValueError("a Fact requires a non-empty source")
         self.value = value
         self.source = source
 
