@@ -178,6 +178,20 @@ class Report:
         }
 
 
+def _clause_bounds(sentence, span):
+    """The (start, end) offsets of the comma/semicolon-delimited clause
+    of `sentence` that contains `span`. See `_clause_at`.
+    """
+    if span is None:
+        return 0, len(sentence)
+    start = span[0]
+    bounds = [0] + [m.end() for m in re.finditer(r"[,;]", sentence)] + [len(sentence) + 1]
+    for lo, hi in zip(bounds, bounds[1:]):
+        if lo <= start < hi:
+            return lo, hi
+    return 0, len(sentence)
+
+
 def _clause_at(sentence, span):
     """The comma/semicolon-delimited clause of `sentence` containing `span`.
 
@@ -187,14 +201,8 @@ def _clause_at(sentence, span):
     judged against the browsers fact just because "browsers" appears
     earlier in the same sentence.
     """
-    if span is None:
-        return sentence
-    start = span[0]
-    bounds = [0] + [m.end() for m in re.finditer(r"[,;]", sentence)] + [len(sentence) + 1]
-    for lo, hi in zip(bounds, bounds[1:]):
-        if lo <= start < hi:
-            return sentence[lo:hi]
-    return sentence
+    lo, hi = _clause_bounds(sentence, span)
+    return sentence[lo:hi]
 
 
 def _expected_value(fact_value):
@@ -208,33 +216,96 @@ def _expected_value(fact_value):
     return None
 
 
+def _singularize(word):
+    """Normalise a word for subject-overlap comparison.
+
+    Deliberately minimal: lowercase, and drop one trailing "s" so a
+    plural in the copy ("commits") lines up with a singular fact key
+    ("commit_count") and vice versa. This is not a stemmer -- it does
+    not know irregular plurals ("children", "geese") and it must not
+    become a prefix match ("commitment" stays a different word from
+    "commit" because dropping *its* trailing letters would require
+    stripping more than one "s"). When that limit matters, the fix is a
+    better fact key or claim wording, not a smarter normaliser here.
+    """
+    word = word.lower()
+    if len(word) > 1 and word.endswith("s"):
+        return word[:-1]
+    return word
+
+
+def _nearest_word_distance(clause, claim_pos, singular_words):
+    """Smallest character distance from `claim_pos` (offset within
+    `clause`) to any occurrence of one of `singular_words`, allowing an
+    optional trailing "s" to match either number. Used only to rank
+    which of several overlapping facts is "closest" to a claim when
+    none of them agree with it -- see `_classify_numeric_claim`.
+    """
+    best = None
+    for word in singular_words:
+        pattern = re.compile(r"\b" + re.escape(word) + r"s?\b", re.IGNORECASE)
+        for match in pattern.finditer(clause):
+            distance = abs(match.start() - claim_pos)
+            if best is None or distance < best:
+                best = distance
+    return best if best is not None else len(clause)
+
+
 def _related_facts(claim, facts):
-    """Every fact whose subject overlaps this claim's own clause.
+    """Every fact whose subject overlaps this claim's own clause, nearest
+    first.
 
     Subject overlap is detected by splitting the fact's key on
     underscores: a fact is "related" to a claim if any of those words
-    appears in the clause the claim's number sits in. This is the one
-    place both proven and contradicted are decided from -- a number is
-    never judged against a fact its own clause doesn't even mention, in
-    either direction. A coincidental value match to some unrelated fact
-    (say, a claim of "one" thing landing on a contributor_count of 1
-    purely by chance) is not evidence of anything: it is not proof, so
+    appears in the clause the claim's number sits in. Both sides are
+    singularised first (see `_singularize`) so "commits" overlaps a
+    fact keyed `commit_count` the same way "commit" would. This is the
+    one place both proven and contradicted are decided from -- a number
+    is never judged against a fact its own clause doesn't even mention,
+    in either direction. A coincidental value match to some unrelated
+    fact (say, a claim of "one" thing landing on a contributor_count of
+    1 purely by chance) is not evidence of anything: it is not proof, so
     it must not be reported as proven.
+
+    A clause can name more than one fact's subject ("runs on three
+    platforms and has 27 commits" overlaps both `ci_platforms` and
+    `commit_count`). Results are ordered by proximity to the claim's own
+    position in the clause, so that if nothing agrees and the claim must
+    be reported as contradicted, it is blamed on the fact it is actually
+    talking about, not just whichever fact happened to be listed first
+    in the profile.
     """
-    clause_words = set(re.findall(r"[a-z0-9]+", _clause_at(claim.context, claim.span).lower()))
+    clause_lo, _clause_hi = _clause_bounds(claim.context, claim.span)
+    clause = _clause_at(claim.context, claim.span)
+    claim_pos = claim.span[0] - clause_lo if claim.span is not None else 0
+    clause_words = {
+        _singularize(w) for w in re.findall(r"[a-z0-9]+", clause.lower())
+    }
     related = []
     for key, fact in facts.items():
         expected = _expected_value(fact["value"])
         if expected is None:
             continue
-        fact_words = set(key.lower().split("_"))
-        if fact_words & clause_words:
-            related.append((key, fact, expected))
-    return related
+        fact_words = {_singularize(w) for w in key.lower().split("_")}
+        overlap = fact_words & clause_words
+        if overlap:
+            distance = _nearest_word_distance(clause, claim_pos, overlap)
+            related.append((distance, key, fact, expected))
+    related.sort(key=lambda item: item[0])
+    return [(key, fact, expected) for _distance, key, fact, expected in related]
 
 
 def _classify_numeric_claim(claim, facts):
-    """("proven"|"contradicted"|"unprovable", (key, fact) or None)."""
+    """("proven"|"contradicted"|"unprovable", (key, fact) or None).
+
+    A claim's clause can overlap more than one fact's subject (say,
+    both "platforms" and "commits" in the same sentence). Checking one
+    overlapping fact in isolation and calling it a day would let a
+    disagreement with fact A shadow an outright agreement with fact B
+    for the *same number* -- a false contradiction. So every overlapping
+    fact is checked, in order: any agreement proves the claim; only when
+    none agree is it contradicted, against the first (closest) overlap.
+    """
     related = _related_facts(claim, facts)
     if not related:
         return "unprovable", None

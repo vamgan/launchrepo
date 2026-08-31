@@ -145,6 +145,79 @@ class TestEntityLists(unittest.TestCase):
         self.assertEqual(report.proven, [])
 
 
+class TestPluralSubjectMatching(unittest.TestCase):
+    """Subject-overlap detection must treat a trailing 's' as optional, so
+    a claim's plural wording ("commits") still overlaps a fact keyed with
+    the singular ("commit_count"), and vice versa.
+    """
+
+    def test_plural_claim_word_matches_singular_fact_key_word(self):
+        profile = {"facts": {
+            "commit_count": {"value": 27, "source": "git log"},
+        }, "unavailable": {}}
+        report = verify.check("This project has 27 commits.", profile)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 27)
+
+    def test_plural_claim_word_still_matches_already_plural_fact_key_word(self):
+        # Guards against a fix that only handles singular-fact/plural-claim
+        # and breaks the case both sides already share.
+        report = verify.check("Runs on three platforms.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 3)
+
+    def test_word_sharing_a_prefix_does_not_falsely_match(self):
+        # "commitment" starts with the same letters as "commit" but is a
+        # different word entirely -- trailing-s normalisation must not
+        # degrade into a prefix match.
+        profile = {"facts": {
+            "commit_count": {"value": 5, "source": "git log"},
+        }, "unavailable": {}}
+        report = verify.check("Real commitment gets you five results.", profile)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 0)
+        self.assertEqual(len(report.contradicted), 0)
+        self.assertEqual(len(report.unprovable), 1)
+        self.assertEqual(report.unprovable[0].value, 5)
+
+
+class TestAgreementBeatsDisagreement(unittest.TestCase):
+    """When a clause's words overlap more than one fact's subject, an
+    agreeing fact must win over a disagreeing one -- a claim is only
+    contradicted when *no* overlapping fact agrees with it.
+    """
+
+    PROFILE = {"facts": {
+        "commit_count": {"value": 27, "source": "git log"},
+        "ci_platforms": {"value": ["ubuntu-latest", "macos-latest", "windows-latest"],
+                          "source": "test.yml"},
+    }, "unavailable": {}}
+
+    def test_true_claims_about_two_different_facts_in_one_sentence_are_both_proven(self):
+        # The exact sentence from the bug report: every claim in it is
+        # true, so nothing may be reported as contradicted.
+        report = verify.check(
+            "launchrepo runs on three platforms and has 27 commits.", self.PROFILE
+        )
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 2)
+        self.assertEqual(len(report.contradicted), 0)
+        self.assertEqual({f.value for f in report.proven}, {3, 27})
+
+    def test_a_genuinely_stale_claim_still_contradicts_alongside_a_true_one(self):
+        report = verify.check(
+            "launchrepo runs on two platforms and has 27 commits.", self.PROFILE
+        )
+        self.assertFalse(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 27)
+        self.assertEqual(len(report.contradicted), 1)
+        self.assertEqual(report.contradicted[0].value, 2)
+        self.assertEqual(report.contradicted[0].conflicts_with, "ci_platforms")
+
+
 class TestSuperlatives(unittest.TestCase):
     def test_never_is_surfaced_as_unprovable(self):
         report = verify.check("It never crashes.", PROFILE)
