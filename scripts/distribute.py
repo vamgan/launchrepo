@@ -14,8 +14,10 @@ rather than trusting a caller's flag.
 """
 
 import argparse
+import json
 import shutil
 import subprocess
+import sys
 import urllib.parse
 
 import verify
@@ -252,10 +254,60 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Distribute generated marketing copy to a platform."
     )
+    parser.add_argument("adapter", nargs="?", help="adapter name, e.g. hackernews")
+    parser.add_argument("--copy", metavar="PATH", help="path to the generated copy file")
+    parser.add_argument("--profile", metavar="PATH", help="path to a profile JSON file")
+    parser.add_argument(
+        "--mode",
+        choices=("dry-run", "send"),
+        default="dry-run",
+        help="dry-run (default) plans without acting; send performs the action "
+             "an adapter's posture allows",
+    )
+    parser.add_argument("--url", help="the URL being announced (hackernews)")
+    parser.add_argument("--tag", help="the release tag (github_release)")
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="publish rather than draft (github_release only; drafts by default)",
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="list every adapter and its posture"
+    )
     args = parser.parse_args(argv)
+
+    if args.list:
+        for name, adapter in sorted(registry().items()):
+            print(f"{name}\t{adapter.posture}")
+        return 0
+
+    if not args.adapter:
+        parser.error("an adapter name is required unless --list is given")
+    if not args.copy or not args.profile:
+        parser.error("--copy and --profile are required")
+
+    with open(args.copy, "r", encoding="utf-8") as fh:
+        copy = fh.read()
+    with open(args.profile, "r", encoding="utf-8") as fh:
+        profile = json.load(fh)
+
+    result = dispatch(
+        args.adapter,
+        copy,
+        profile,
+        mode=args.mode,
+        url=args.url,
+        tag=args.tag,
+        publish=args.publish,
+    )
+
+    output = json.dumps(result, indent=2, sort_keys=True)
+    if isinstance(result, dict) and result.get("ok") is False:
+        print(output, file=sys.stderr)
+        return 1
+    print(output)
     return 0
 
 
 if __name__ == "__main__":
-    import sys
     sys.exit(main())
