@@ -3,7 +3,7 @@
 Every extractor in this module either records a value together with the
 exact command or file that produced it, or records why it could not.
 Nothing here is ever guessed, defaulted, or rounded: an unrecognised
-licence body, an unparsable CI matrix, or a failed git command all become
+license body, an unparsable CI matrix, or a failed git command all become
 `unavailable` entries rather than a best-effort value, because a wrong
 fact stated as true in generated marketing copy is the failure this tool
 exists to prevent.
@@ -31,8 +31,8 @@ LICENSE_FILENAMES = (
     "COPYING.txt",
 )
 
-# Each licence is recognised only by phrases distinctive enough that no
-# other common licence body contains them. All phrases in a tuple must
+# Each license is recognised only by phrases distinctive enough that no
+# other common license body contains them. All phrases in a tuple must
 # match (case-insensitively) before that name is used -- a partial match
 # is not a match, it's a guess, and guesses are exactly what this file
 # must never produce.
@@ -131,7 +131,7 @@ def _extract_name(repo, profile):
     profile.record("name", basename, "directory name (no git remote configured)")
 
 
-def _detect_licence_text(text):
+def _detect_license_text(text):
     lowered = text.lower()
     for name, signatures in LICENSE_SIGNATURES:
         if all(signature in lowered for signature in signatures):
@@ -139,7 +139,7 @@ def _detect_licence_text(text):
     return None
 
 
-def _extract_licence(repo, profile):
+def _extract_license(repo, profile):
     for filename in LICENSE_FILENAMES:
         path = os.path.join(repo, filename)
         if not os.path.isfile(path):
@@ -149,15 +149,15 @@ def _extract_licence(repo, profile):
                 text = fh.read()
         except OSError:
             continue
-        licence = _detect_licence_text(text)
-        if licence:
-            profile.record("licence", licence, filename)
+        license = _detect_license_text(text)
+        if license:
+            profile.record("license", license, filename)
         else:
             profile.unavailable(
-                "licence", f"{filename} present but its text matched no known licence"
+                "license", f"{filename} present but its text matched no known license"
             )
         return
-    profile.unavailable("licence", "no LICENSE file found")
+    profile.unavailable("license", "no LICENSE file found")
 
 
 def _extract_language(repo, profile):
@@ -427,7 +427,7 @@ def extract(repo):
 
     profile = Profile()
     _extract_name(repo, profile)
-    _extract_licence(repo, profile)
+    _extract_license(repo, profile)
     _extract_language(repo, profile)
     _extract_history(repo, profile)
     _extract_ci_platforms(repo, profile)

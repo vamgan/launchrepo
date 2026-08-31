@@ -47,28 +47,28 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 """
 
 
-class TestLicence(unittest.TestCase):
-    def test_mit_licence_is_detected(self):
+class TestLicense(unittest.TestCase):
+    def test_mit_license_is_detected(self):
         repo = make_repo(files={"README.md": "# t\n", "LICENSE": MIT_TEXT})
         p = profile_mod.extract(repo)
-        self.assertEqual(p.value("licence"), "MIT")
+        self.assertEqual(p.value("license"), "MIT")
 
-    def test_apache_licence_is_detected(self):
+    def test_apache_license_is_detected(self):
         repo = make_repo(files={"README.md": "# t\n", "LICENSE": APACHE_TEXT})
         p = profile_mod.extract(repo)
-        self.assertEqual(p.value("licence"), "Apache-2.0")
+        self.assertEqual(p.value("license"), "Apache-2.0")
 
-    def test_unrecognised_licence_body_is_unavailable(self):
+    def test_unrecognised_license_body_is_unavailable(self):
         repo = make_repo(files={"README.md": "# t\n", "LICENSE": "do whatever you want\n"})
         p = profile_mod.extract(repo)
-        self.assertIsNone(p.value("licence"))
-        self.assertIn("licence", p.reasons())
+        self.assertIsNone(p.value("license"))
+        self.assertIn("license", p.reasons())
 
-    def test_missing_licence_file_is_unavailable(self):
+    def test_missing_license_file_is_unavailable(self):
         repo = make_repo()
         p = profile_mod.extract(repo)
-        self.assertIsNone(p.value("licence"))
-        self.assertIn("licence", p.reasons())
+        self.assertIsNone(p.value("license"))
+        self.assertIn("license", p.reasons())
 
 
 class TestLanguage(unittest.TestCase):
