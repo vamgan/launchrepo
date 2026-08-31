@@ -95,6 +95,20 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(len(one_findings), 1)
         self.assertIn(one_findings[0], report.unprovable)
 
+    def test_a_coincidental_value_match_without_subject_overlap_is_unprovable(self):
+        # "one markdown file" happening to equal an unrelated fact's value
+        # (here, a contributor count of 1) is not evidence of anything. A
+        # false "proven" is worse than an unprovable: unprovable prompts a
+        # human to look, proven tells them it's already checked.
+        profile = {"facts": {
+            "contributor_count": {"value": 1, "source": "git log --format=%ae"},
+        }, "unavailable": {}}
+        report = verify.check("Ten browsers, one markdown file.", profile)
+        self.assertTrue(report.ok)
+        one_findings = [f for f in report.proven + report.unprovable if f.value == 1]
+        self.assertEqual(len(one_findings), 1)
+        self.assertIn(one_findings[0], report.unprovable)
+
 
 class TestEntityLists(unittest.TestCase):
     def test_a_complete_list_is_fine(self):
