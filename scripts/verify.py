@@ -9,7 +9,10 @@ or unprovable (no fact speaks to it -- not an error). This module does
 not import profile.py; the two communicate only through that JSON shape.
 """
 
+import argparse
+import json
 import re
+import sys
 
 # Number words this module recognises as quantity claims, one through
 # twenty. Anything larger is written with digits in practice, and this
@@ -296,3 +299,76 @@ def check(text, profile):
             report.unprovable.append(Finding("superlative", sentence))
 
     return report
+
+
+def _format_finding(finding):
+    return f'  - "{finding.context}"'
+
+
+def _format_human(report):
+    lines = []
+
+    if report.contradicted:
+        lines.append(f"CONTRADICTED ({len(report.contradicted)}):")
+        for finding in report.contradicted:
+            lines.append(_format_finding(finding))
+            lines.append(
+                f"    says {finding.value!r}, but {finding.conflicts_with} = "
+                f"{finding.fact_value!r} ({finding.source})"
+            )
+            if isinstance(finding.value, list) and isinstance(finding.fact_value, list):
+                missing = [m for m in finding.fact_value if m not in finding.value]
+                if missing:
+                    lines.append(f"    left out: {', '.join(missing)}")
+        lines.append("")
+
+    if report.unprovable:
+        lines.append(f"UNPROVABLE ({len(report.unprovable)}, not a failure):")
+        for finding in report.unprovable:
+            lines.append(_format_finding(finding))
+        lines.append("")
+
+    if report.proven:
+        lines.append(f"PROVEN ({len(report.proven)}):")
+        for finding in report.proven:
+            lines.append(_format_finding(finding))
+        lines.append("")
+
+    status = "OK" if report.ok else "FAILED"
+    lines.append(
+        f"{status}: {len(report.proven)} proven, {len(report.contradicted)} contradicted, "
+        f"{len(report.unprovable)} unprovable"
+    )
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Verify generated marketing copy against a repository fact profile."
+    )
+    parser.add_argument("copy", help="path to the generated copy file")
+    parser.add_argument(
+        "--profile", required=True, metavar="PATH", help="path to a profile JSON file"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="emit a machine-readable JSON report"
+    )
+    args = parser.parse_args(argv)
+
+    with open(args.copy, "r", encoding="utf-8") as fh:
+        text = fh.read()
+    with open(args.profile, "r", encoding="utf-8") as fh:
+        profile = json.load(fh)
+
+    report = check(text, profile)
+
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        print(_format_human(report))
+
+    return 0 if report.ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
