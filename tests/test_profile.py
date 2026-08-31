@@ -118,5 +118,79 @@ class TestHistory(unittest.TestCase):
         self.assertIn("git", p.source("contributor_count"))
 
 
+MATRIX_WORKFLOW = """
+name: CI
+on: [push]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: echo hi
+"""
+
+PLAIN_WORKFLOW = """
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"""
+
+WEIRD_WORKFLOW = """
+name: CI
+on: [push]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: !!weird
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: echo hi
+"""
+
+
+class TestCIPlatforms(unittest.TestCase):
+    def test_reads_os_matrix_list(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            ".github/workflows/ci.yml": MATRIX_WORKFLOW,
+        })
+        p = profile_mod.extract(repo)
+        self.assertEqual(
+            p.value("ci_platforms"),
+            ["ubuntu-latest", "macos-latest", "windows-latest"],
+        )
+        self.assertIn("ci.yml", p.source("ci_platforms"))
+
+    def test_reads_plain_runs_on_as_single_item_list(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            ".github/workflows/ci.yml": PLAIN_WORKFLOW,
+        })
+        p = profile_mod.extract(repo)
+        self.assertEqual(p.value("ci_platforms"), ["ubuntu-latest"])
+
+    def test_no_workflow_files_is_unavailable(self):
+        repo = make_repo()
+        p = profile_mod.extract(repo)
+        self.assertIsNone(p.value("ci_platforms"))
+        self.assertIn("ci_platforms", p.reasons())
+
+    def test_unparsable_matrix_line_is_unavailable_not_partial(self):
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            ".github/workflows/ci.yml": WEIRD_WORKFLOW,
+        })
+        p = profile_mod.extract(repo)
+        self.assertIsNone(p.value("ci_platforms"))
+        self.assertIn("ci_platforms", p.reasons())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -179,6 +179,96 @@ def _extract_language(repo, profile):
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# A bare scalar we're willing to treat as a platform name/expression --
+# letters, digits, dot, hyphen, underscore. Anything else (YAML tags like
+# `!!weird`, anchors, nested structures) is a shape we do not attempt to
+# parse: recording nothing is safer than a partial or wrong read.
+_YAML_SCALAR_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+def _parse_yaml_flow_list(inner):
+    """Parse the inside of a `[a, b, c]` flow list of bare/quoted scalars.
+
+    Returns the list of items, or None if any item isn't a plain scalar
+    we're confident about -- never a partial list.
+    """
+    items = []
+    for raw_item in inner.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        if len(item) >= 2 and item[0] == item[-1] and item[0] in "\"'":
+            item = item[1:-1]
+        if not _YAML_SCALAR_RE.match(item):
+            return None
+        items.append(item)
+    return items if items else None
+
+
+def _read_ci_platforms_from_file(path):
+    """Return (platform_list_or_None, failure_reason_or_None) for one workflow file."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            lines = fh.readlines()
+    except OSError as exc:
+        return None, f"could not read file: {exc}"
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("os:"):
+            continue
+        value = stripped[len("os:"):].strip()
+        if value.startswith("[") and value.endswith("]"):
+            items = _parse_yaml_flow_list(value[1:-1])
+            if items:
+                return items, None
+        return None, f"could not confidently parse `{stripped}`"
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("runs-on:"):
+            continue
+        value = stripped[len("runs-on:"):].strip()
+        if value.startswith("${{"):
+            # A reference to a matrix variable, not a literal platform.
+            continue
+        if _YAML_SCALAR_RE.match(value):
+            return [value], None
+        return None, f"could not confidently parse `{stripped}`"
+
+    return None, "no os matrix or runs-on found"
+
+
+def _extract_ci_platforms(repo, profile):
+    workflows_dir = os.path.join(repo, ".github", "workflows")
+    if not os.path.isdir(workflows_dir):
+        profile.unavailable("ci_platforms", "no .github/workflows directory found")
+        return
+
+    workflow_files = sorted(
+        f for f in os.listdir(workflows_dir) if f.endswith((".yml", ".yaml"))
+    )
+    if not workflow_files:
+        profile.unavailable(
+            "ci_platforms", "no workflow files found in .github/workflows"
+        )
+        return
+
+    first_failure = None
+    for filename in workflow_files:
+        items, reason = _read_ci_platforms_from_file(
+            os.path.join(workflows_dir, filename)
+        )
+        if items:
+            profile.record(
+                "ci_platforms", items, f".github/workflows/{filename}"
+            )
+            return
+        if reason and first_failure is None:
+            first_failure = f"{filename}: {reason}"
+
+    profile.unavailable("ci_platforms", first_failure)
+
 
 def _extract_history(repo, profile):
     count = _git(repo, "rev-list", "--count", "HEAD")
@@ -222,4 +312,5 @@ def extract(repo):
     _extract_licence(repo, profile)
     _extract_language(repo, profile)
     _extract_history(repo, profile)
+    _extract_ci_platforms(repo, profile)
     return profile
