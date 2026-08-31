@@ -43,5 +43,58 @@ class TestFindClaims(unittest.TestCase):
         self.assertEqual(claims[0].kind, "number")
 
 
+PROFILE = {"facts": {
+    "tests":              {"value": 153, "source": "unittest"},
+    "browsers_supported": {"value": 11,  "source": "platforms.py"},
+    "ci_platforms":       {"value": ["ubuntu-latest", "macos-latest", "windows-latest"],
+                           "source": "test.yml"}}, "unavailable": {}}
+
+
+class TestCheck(unittest.TestCase):
+    def test_matching_number_is_proven(self):
+        report = verify.check("We ship with 153 tests.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 153)
+
+    def test_matching_number_word_is_proven(self):
+        report = verify.check("Supports eleven browsers.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 11)
+
+    def test_ten_browsers_one_markdown_file_is_contradicted(self):
+        # The exact line that shipped to a live site while the coverage
+        # table two sections below said eleven.
+        report = verify.check("Ten browsers, one markdown file.", PROFILE)
+        self.assertFalse(report.ok)
+        self.assertEqual(len(report.contradicted), 1)
+        finding = report.contradicted[0]
+        self.assertEqual(finding.value, 10)
+        self.assertEqual(finding.conflicts_with, "browsers_supported")
+        self.assertEqual(finding.fact_value, 11)
+        self.assertEqual(finding.source, "platforms.py")
+
+    def test_unrelated_number_is_unprovable_and_does_not_fail(self):
+        report = verify.check("It takes 47 seconds to run.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.unprovable), 1)
+        self.assertEqual(report.unprovable[0].value, 47)
+
+    def test_number_equal_to_list_length_is_proven(self):
+        report = verify.check("Runs on three platforms.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertEqual(len(report.proven), 1)
+        self.assertEqual(report.proven[0].value, 3)
+
+    def test_a_number_sharing_a_sentence_with_an_unrelated_fact_is_left_alone(self):
+        # "one markdown file" must not be judged against browsers_supported
+        # just because "browsers" appears earlier in the same sentence.
+        report = verify.check("Ten browsers, one markdown file.", PROFILE)
+        one_findings = [f for f in report.contradicted + report.unprovable if f.value == 1]
+        self.assertEqual(len(one_findings), 1)
+        self.assertIn(one_findings[0], report.unprovable)
+
+
 if __name__ == "__main__":
     unittest.main()
