@@ -9,6 +9,8 @@ fact stated as true in generated marketing copy is the failure this tool
 exists to prevent.
 """
 
+import argparse
+import json
 import os
 import re
 import subprocess
@@ -399,3 +401,27 @@ def extract(repo):
     # override anything generic extraction produced above.
     _extract_declared_facts(repo, profile)
     return profile
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Extract a fact profile from a git repository."
+    )
+    parser.add_argument("repo", nargs="?", default=".", help="path to the repository")
+    parser.add_argument(
+        "--out", metavar="PATH", help="write JSON to this path instead of stdout"
+    )
+    args = parser.parse_args(argv)
+
+    profile = extract(args.repo)
+    output = json.dumps(profile.as_dict(), indent=2, sort_keys=True)
+
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write(output + "\n")
+    else:
+        print(output)
+
+
+if __name__ == "__main__":
+    main()
