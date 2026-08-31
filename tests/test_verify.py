@@ -131,5 +131,30 @@ class TestEntityLists(unittest.TestCase):
         self.assertEqual(report.proven, [])
 
 
+class TestSuperlatives(unittest.TestCase):
+    def test_never_is_surfaced_as_unprovable(self):
+        report = verify.check("It never crashes.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertTrue(any(f.value == "superlative" for f in report.unprovable))
+
+    def test_always_is_surfaced_as_unprovable(self):
+        report = verify.check("It always works.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertTrue(any(f.value == "superlative" for f in report.unprovable))
+
+    def test_the_only_is_surfaced_as_unprovable(self):
+        report = verify.check("The only tool you need.", PROFILE)
+        self.assertTrue(report.ok)
+        self.assertTrue(any(f.value == "superlative" for f in report.unprovable))
+
+    def test_a_superlative_does_not_fail_the_build(self):
+        report = verify.check("It is always the only choice and never breaks.", PROFILE)
+        self.assertTrue(report.ok)
+
+    def test_ordinary_prose_produces_no_superlative_finding(self):
+        report = verify.check("It runs quickly and reliably.", PROFILE)
+        self.assertFalse(any(f.value == "superlative" for f in report.unprovable))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,17 @@ _CLAIM_TOKEN_RE = re.compile(
 # by a digit, not whitespace, so it is never mistaken for a boundary.
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Absolutes no repository can prove -- a human has to stand behind
+# these, not a fact profile. Deliberately a short, high-confidence list
+# rather than every superlative-ish word, so ordinary confident prose
+# ("the fastest way to ship") is not swept in alongside genuine
+# unfalsifiable claims.
+SUPERLATIVES = ("never", "always", "the only")
+_SUPERLATIVE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(phrase) for phrase in SUPERLATIVES) + r")\b",
+    re.IGNORECASE,
+)
+
 
 class Claim:
     """One quantity mentioned in the copy: what it says, and where.
@@ -279,5 +290,9 @@ def check(text, profile):
             continue
         for outcome, finding in _check_entity_list(text, key, fact):
             getattr(report, outcome).append(finding)
+
+    for sentence in _split_sentences(text):
+        for _ in _SUPERLATIVE_RE.finditer(sentence):
+            report.unprovable.append(Finding("superlative", sentence))
 
     return report
