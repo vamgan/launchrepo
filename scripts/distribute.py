@@ -15,6 +15,8 @@ rather than trusting a caller's flag.
 
 import argparse
 
+import verify
+
 POSTURES = ("auto", "confirm", "prepare")
 
 
@@ -51,6 +53,55 @@ def registry():
     """Every known adapter, keyed by name."""
     adapters = ()
     return {adapter.name: adapter for adapter in adapters}
+
+
+def _describe_contradictions(report):
+    parts = []
+    for finding in report.contradicted:
+        parts.append(
+            f"{finding.context!r} says {finding.value!r}, but "
+            f"{finding.conflicts_with} = {finding.fact_value!r} ({finding.source})"
+        )
+    return "; ".join(parts)
+
+
+def dispatch(name, copy, profile, mode="dry-run", **options):
+    """Verify `copy` against `profile`, then hand it to adapter `name`.
+
+    Verification runs first, before the adapter is even looked up.
+    Distributing copy that contradicts the repository is the exact
+    failure this tool exists to prevent, and the moment before it
+    becomes public is the last place to catch it -- so contradicted
+    copy must fail here even if `name` is misspelled or doesn't exist,
+    rather than surfacing an "unknown adapter" error that would let the
+    real problem go unnoticed. Unprovable copy passes through: plenty
+    of true statements are unprovable, and blocking them would make the
+    tool unusable.
+    """
+    report = verify.check(copy, profile)
+    if not report.ok:
+        raise SystemExit(
+            f"copy contradicts the repository: {_describe_contradictions(report)}"
+        )
+
+    adapters = registry()
+    if name not in adapters:
+        raise SystemExit(
+            f"unknown adapter {name!r}: choices are {', '.join(sorted(adapters)) or '(none registered)'}"
+        )
+    adapter = adapters[name]
+
+    plan = adapter.plan(copy, **options)
+
+    if mode == "send":
+        if not hasattr(adapter, "send"):
+            raise SystemExit(
+                f"{name}'s posture is '{adapter.posture}': a human must submit "
+                "this by hand, this tool cannot send it"
+            )
+        return adapter.send(plan, **options)
+
+    return plan
 
 
 def main(argv=None):
