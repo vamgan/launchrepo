@@ -182,6 +182,22 @@ class TestCIPlatforms(unittest.TestCase):
         self.assertIsNone(p.value("ci_platforms"))
         self.assertIn("ci_platforms", p.reasons())
 
+    def test_matrix_in_one_file_wins_over_plain_runs_on_in_another(self):
+        # "pages.yml" sorts before "test.yml" alphabetically; the real
+        # three-platform matrix lives in the file that sorts second, and
+        # must not be eclipsed by the single-job workflow that sorts first.
+        repo = make_repo(files={
+            "README.md": "# t\n",
+            ".github/workflows/pages.yml": PLAIN_WORKFLOW,
+            ".github/workflows/test.yml": MATRIX_WORKFLOW,
+        })
+        p = profile_mod.extract(repo)
+        self.assertEqual(
+            p.value("ci_platforms"),
+            ["ubuntu-latest", "macos-latest", "windows-latest"],
+        )
+        self.assertIn("test.yml", p.source("ci_platforms"))
+
     def test_unparsable_matrix_line_is_unavailable_not_partial(self):
         repo = make_repo(files={
             "README.md": "# t\n",
