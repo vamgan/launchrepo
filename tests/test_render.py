@@ -1,4 +1,5 @@
-import os, sys, tempfile, unittest
+import os, struct, sys, tempfile, unittest
+from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import render
@@ -78,6 +79,49 @@ class TestFindChrome(unittest.TestCase):
         finally:
             if old is not None:
                 os.environ["CHROME"] = old
+
+
+class TestRender(unittest.TestCase):
+    def _write_template(self, tmp, html_text):
+        path = os.path.join(tmp, "template.html")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(html_text)
+        return path
+
+    def test_missing_chrome_returns_ok_false_without_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            template = self._write_template(tmp, "<html><body>{{name}}</body></html>")
+            out_path = os.path.join(tmp, "out.png")
+            with mock.patch("render.find_chrome", return_value=None):
+                result = render.render(template, PROFILE, out_path, 100, 50)
+            self.assertFalse(result.ok)
+            self.assertIn("chrome", result.reason.lower())
+
+    def test_unprovable_placeholder_raises_before_chrome_launches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            template = self._write_template(tmp, "<html><body>{{tagline}}</body></html>")
+            out_path = os.path.join(tmp, "out.png")
+            with mock.patch("render.find_chrome") as find_chrome_mock:
+                with self.assertRaises(SystemExit):
+                    render.render(template, PROFILE, out_path, 100, 50)
+                find_chrome_mock.assert_not_called()
+
+    @unittest.skipIf(render.find_chrome() is None, "no Chrome on this machine")
+    def test_produces_a_real_png_with_scaled_dimensions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            template = self._write_template(
+                tmp, "<html><body style='margin:0'>{{name}}</body></html>"
+            )
+            out_path = os.path.join(tmp, "out.png")
+            result = render.render(template, PROFILE, out_path, 100, 50, scale=2)
+            self.assertTrue(result.ok, result.reason)
+            self.assertEqual(result.path, out_path)
+            with open(out_path, "rb") as fh:
+                header = fh.read(24)
+            self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")
+            width, height = struct.unpack(">II", header[16:24])
+            self.assertEqual(width, 200)
+            self.assertEqual(height, 100)
 
 
 if __name__ == "__main__":
