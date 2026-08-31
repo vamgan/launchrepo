@@ -1,4 +1,5 @@
 import os, sys, unittest
+from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import distribute
@@ -126,6 +127,53 @@ class TestProductHuntAdapter(unittest.TestCase):
         message = str(cm.exception).lower()
         self.assertIn("prepare", message)
         self.assertIn("human", message)
+
+
+class TestGitHubReleaseAdapter(unittest.TestCase):
+    def setUp(self):
+        self.adapter = distribute.registry()["github_release"]
+
+    def test_posture_is_auto(self):
+        self.assertEqual(self.adapter.posture, "auto")
+
+    def test_dry_run_reports_the_command_without_running_it(self):
+        with mock.patch.object(distribute.subprocess, "run") as run:
+            plan = distribute.dispatch(
+                "github_release", CLEAN_COPY, PROFILE, mode="dry-run", tag="v1.0.0"
+            )
+        run.assert_not_called()
+        self.assertIn("gh", plan["command"])
+        self.assertIn("v1.0.0", plan["command"])
+
+    def test_drafts_by_default(self):
+        plan = self.adapter.plan(CLEAN_COPY, tag="v1.0.0")
+        self.assertTrue(plan["draft"])
+        self.assertIn("--draft", plan["command"])
+
+    def test_publishing_requires_explicitly_asking(self):
+        plan = self.adapter.plan(CLEAN_COPY, tag="v1.0.0", publish=True)
+        self.assertFalse(plan["draft"])
+        self.assertNotIn("--draft", plan["command"])
+
+    def test_missing_tag_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.adapter.plan(CLEAN_COPY)
+
+    def test_missing_gh_binary_returns_a_reason_rather_than_raising(self):
+        plan = self.adapter.plan(CLEAN_COPY, tag="v1.0.0")
+        with mock.patch.object(distribute.shutil, "which", return_value=None):
+            result = self.adapter.send(plan)
+        self.assertFalse(result["ok"])
+        self.assertIn("gh", result["reason"])
+
+    def test_send_shells_out_to_gh(self):
+        plan = self.adapter.plan(CLEAN_COPY, tag="v1.0.0")
+        completed = mock.Mock(returncode=0, stdout="https://github.com/x/y/releases/tag/v1.0.0\n", stderr="")
+        with mock.patch.object(distribute.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(distribute.subprocess, "run", return_value=completed) as run:
+            result = self.adapter.send(plan)
+        run.assert_called_once()
+        self.assertTrue(result["ok"])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ rather than trusting a caller's flag.
 """
 
 import argparse
+import shutil
+import subprocess
 import urllib.parse
 
 import verify
@@ -128,9 +130,72 @@ class ProductHuntAdapter(Adapter):
         }
 
 
+class GitHubReleaseAdapter(Adapter):
+    """Creates (or plans) a GitHub release via the `gh` CLI.
+
+    GitHub is an owned surface with a real API, so automation is
+    appropriate -- posture "auto". But a release notifies every
+    watcher the moment it's published and that notification cannot be
+    unsent, so this adapter creates a draft unless explicitly told
+    otherwise: `publish=True` must be passed on purpose, there is no
+    posture-level way to make publishing the default.
+    """
+
+    def __init__(self):
+        super().__init__("github_release", "auto")
+
+    def plan(self, copy, tag=None, publish=False, **_options):
+        if not tag:
+            raise SystemExit(f"{self.name}: --tag is required")
+        draft = not publish
+        command = ["gh", "release", "create", tag, "--notes-file", "-"]
+        if draft:
+            command.append("--draft")
+        return {
+            "adapter": self.name,
+            "posture": self.posture,
+            "command": command,
+            "draft": draft,
+            "copy": copy,
+        }
+
+    def send(self, plan, **_options):
+        """Run the planned `gh` command, feeding `copy` in as notes.
+
+        A missing `gh` binary is an environment fact, not a bug in this
+        module -- it comes back as `{"ok": False, "reason": ...}` the
+        same way `render.render()` reports a missing Chrome, rather
+        than raising.
+        """
+        gh = shutil.which("gh")
+        if not gh:
+            return {
+                "ok": False,
+                "reason": "gh binary not found on PATH: install the GitHub CLI "
+                          "or add it to PATH",
+            }
+        command = [gh, *plan["command"][1:]]
+        try:
+            result = subprocess.run(
+                command,
+                input=plan["copy"],
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            return {"ok": False, "reason": f"gh could not be run: {exc}"}
+
+        ok = result.returncode == 0
+        return {
+            "ok": ok,
+            "reason": None if ok else result.stderr.strip(),
+            "stdout": result.stdout,
+        }
+
+
 def registry():
     """Every known adapter, keyed by name."""
-    adapters = (HackerNewsAdapter(), ProductHuntAdapter())
+    adapters = (HackerNewsAdapter(), ProductHuntAdapter(), GitHubReleaseAdapter())
     return {adapter.name: adapter for adapter in adapters}
 
 
