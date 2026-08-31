@@ -46,5 +46,39 @@ class TestFill(unittest.TestCase):
         self.assertEqual(render.fill("plain text", PROFILE, {}), "plain text")
 
 
+class TestFindChrome(unittest.TestCase):
+    def test_honours_explicit_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = os.path.join(tmp, "my-chrome")
+            with open(fake, "w") as fh:
+                fh.write("#!/bin/sh\n")
+            os.chmod(fake, 0o755)
+            self.assertEqual(render.find_chrome(explicit=fake), fake)
+
+    def test_honours_chrome_env_var(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = os.path.join(tmp, "env-chrome")
+            with open(fake, "w") as fh:
+                fh.write("#!/bin/sh\n")
+            os.chmod(fake, 0o755)
+            old = os.environ.get("CHROME")
+            os.environ["CHROME"] = fake
+            try:
+                self.assertEqual(render.find_chrome(), fake)
+            finally:
+                if old is None:
+                    os.environ.pop("CHROME", None)
+                else:
+                    os.environ["CHROME"] = old
+
+    def test_returns_none_when_nothing_found(self):
+        old = os.environ.pop("CHROME", None)
+        try:
+            self.assertIsNone(render.find_chrome(candidates=[]))
+        finally:
+            if old is not None:
+                os.environ["CHROME"] = old
+
+
 if __name__ == "__main__":
     unittest.main()
