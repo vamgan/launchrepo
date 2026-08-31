@@ -1,4 +1,5 @@
 import os, sys, unittest
+import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -95,6 +96,26 @@ class TestLanguage(unittest.TestCase):
         p = profile_mod.extract(repo)
         self.assertIsNone(p.value("language"))
         self.assertIn("language", p.reasons())
+
+
+class TestHistory(unittest.TestCase):
+    def test_commit_count(self):
+        repo = make_repo(commits=4)
+        p = profile_mod.extract(repo)
+        self.assertEqual(p.value("commit_count"), 4)
+        self.assertIn("git", p.source("commit_count"))
+
+    def test_first_commit_date_is_iso_format(self):
+        repo = make_repo(commits=2)
+        p = profile_mod.extract(repo)
+        self.assertRegex(p.value("first_commit_date"), r"^\d{4}-\d{2}-\d{2}$")
+        self.assertIn("git", p.source("first_commit_date"))
+
+    def test_contributor_count_is_unique_author_emails(self):
+        repo = make_repo(commits=3)
+        p = profile_mod.extract(repo)
+        self.assertEqual(p.value("contributor_count"), 1)
+        self.assertIn("git", p.source("contributor_count"))
 
 
 if __name__ == "__main__":

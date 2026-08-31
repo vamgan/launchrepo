@@ -10,6 +10,7 @@ exists to prevent.
 """
 
 import os
+import re
 import subprocess
 
 from facts import Profile
@@ -176,6 +177,42 @@ def _extract_language(repo, profile):
     )
 
 
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _extract_history(repo, profile):
+    count = _git(repo, "rev-list", "--count", "HEAD")
+    if count is not None and count.isdigit():
+        profile.record("commit_count", int(count), "git rev-list --count HEAD")
+    else:
+        profile.unavailable("commit_count", "git rev-list --count HEAD failed")
+
+    log = _git(repo, "log", "--reverse", "--format=%ad", "--date=short")
+    first_date = log.splitlines()[0] if log else None
+    if first_date and _ISO_DATE_RE.match(first_date):
+        profile.record(
+            "first_commit_date",
+            first_date,
+            "git log --reverse --format=%ad --date=short",
+        )
+    else:
+        profile.unavailable(
+            "first_commit_date",
+            "git log --reverse --format=%ad --date=short produced no usable date",
+        )
+
+    authors = _git(repo, "log", "--format=%ae")
+    unique_authors = {line for line in authors.splitlines() if line} if authors is not None else set()
+    if unique_authors:
+        profile.record(
+            "contributor_count", len(unique_authors), "git log --format=%ae"
+        )
+    else:
+        profile.unavailable(
+            "contributor_count", "git log --format=%ae produced no author emails"
+        )
+
+
 def extract(repo):
     if not os.path.isdir(os.path.join(repo, ".git")):
         raise SystemExit(f"not a git repository: {repo}")
@@ -184,4 +221,5 @@ def extract(repo):
     _extract_name(repo, profile)
     _extract_licence(repo, profile)
     _extract_language(repo, profile)
+    _extract_history(repo, profile)
     return profile
