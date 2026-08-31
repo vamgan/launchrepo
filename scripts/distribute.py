@@ -14,10 +14,15 @@ rather than trusting a caller's flag.
 """
 
 import argparse
+import urllib.parse
 
 import verify
 
 POSTURES = ("auto", "confirm", "prepare")
+
+# Hacker News truncates a submitted title past this length, silently,
+# in the listing the author never gets to review before it's public.
+_HN_TITLE_LIMIT = 80
 
 
 class Adapter:
@@ -49,9 +54,83 @@ class Adapter:
         raise NotImplementedError
 
 
+def _split_title(copy):
+    """The copy's first line as its title, the rest as its body.
+
+    Generated copy is authored the way a post is: a headline line
+    followed by the body. Adapters that need a title (Hacker News,
+    a release's subject) read it from here instead of requiring a
+    separate CLI flag that could drift out of sync with the copy file.
+    """
+    lines = copy.strip().splitlines()
+    title = lines[0].strip() if lines else ""
+    body = "\n".join(lines[1:]).strip()
+    return title, body
+
+
+class HackerNewsAdapter(Adapter):
+    """Produces a pre-filled Hacker News submission link.
+
+    Hacker News treats automated submission as bannable and expects
+    the author present in the comments, so this adapter's posture is
+    "prepare": it can only hand a human a link to click, never submit
+    on its own -- see the base class for why that isn't even a `send`
+    method that refuses, but no `send` method at all.
+    """
+
+    def __init__(self):
+        super().__init__("hackernews", "prepare")
+
+    def plan(self, copy, url=None, **_options):
+        if not url:
+            raise SystemExit(f"{self.name}: --url is required")
+        title, _body = _split_title(copy)
+        if len(title) > _HN_TITLE_LIMIT:
+            raise SystemExit(
+                f"{self.name}: title is {len(title)} characters, over the "
+                f"{_HN_TITLE_LIMIT}-character limit Hacker News truncates to -- "
+                "the author would never see it happen"
+            )
+        query = urllib.parse.urlencode({"u": url, "t": title})
+        return {
+            "adapter": self.name,
+            "posture": self.posture,
+            "submission_url": f"https://news.ycombinator.com/submitlink?{query}",
+            "note": "a human must submit this and stay present in the comments; "
+                    "automated submission is bannable on Hacker News",
+        }
+
+
+class ProductHuntAdapter(Adapter):
+    """Produces a submission plan for Product Hunt.
+
+    Product Hunt has no query-string prefill, so there is no link to
+    hand over the way Hacker News gets one -- the plan instead carries
+    the submission URL, the copy to paste by hand, and a note that
+    launches run 12:01am to 11:59pm Pacific and rank across the whole
+    day, so the hour a human chooses to submit matters. Posture is
+    "prepare" for the same reason as Hacker News: automated submission
+    is bannable and the author is expected present.
+    """
+
+    def __init__(self):
+        super().__init__("producthunt", "prepare")
+
+    def plan(self, copy, **_options):
+        return {
+            "adapter": self.name,
+            "posture": self.posture,
+            "submission_url": "https://www.producthunt.com/posts/new",
+            "copy": copy,
+            "note": "a human must submit this; Product Hunt launches run "
+                    "12:01am to 11:59pm Pacific and rank across the whole day, "
+                    "so the hour of submission matters",
+        }
+
+
 def registry():
     """Every known adapter, keyed by name."""
-    adapters = ()
+    adapters = (HackerNewsAdapter(), ProductHuntAdapter())
     return {adapter.name: adapter for adapter in adapters}
 
 
