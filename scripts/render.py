@@ -196,12 +196,25 @@ def _parse_set(raw):
 
     Raised as ArgumentTypeError so argparse reports it the same way as
     any other malformed argument -- a usage message and a non-zero
-    exit, not a traceback.
+    exit, not a traceback. Split on the first `=` only, so a value that
+    itself contains `=` (e.g. an install command) survives intact.
+
+    An empty or whitespace-only value is rejected, separately from a
+    missing `=` entirely: those are different mistakes. `--set key=`
+    would otherwise fill the placeholder with a blank that renders as
+    if it were a real, deliberate value -- exactly the "looks finished
+    but isn't" failure this module exists to prevent -- and the most
+    likely real cause is an unexpanded shell variable the user would
+    want surfaced, not silently rendered.
     """
     key, sep, value = raw.partition("=")
     if not sep or not key:
         raise argparse.ArgumentTypeError(
             f"invalid --set value {raw!r}: expected KEY=VALUE"
+        )
+    if not value.strip():
+        raise argparse.ArgumentTypeError(
+            f"invalid --set value for {key!r}: empty value is not allowed"
         )
     return key, value
 
