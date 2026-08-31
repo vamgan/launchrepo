@@ -96,5 +96,40 @@ class TestCheck(unittest.TestCase):
         self.assertIn(one_findings[0], report.unprovable)
 
 
+class TestEntityLists(unittest.TestCase):
+    def test_a_complete_list_is_fine(self):
+        report = verify.check(
+            "Tested on ubuntu-latest, macos-latest, and windows-latest.", PROFILE
+        )
+        self.assertTrue(report.ok)
+        self.assertTrue(any(
+            set(f.value) == {"ubuntu-latest", "macos-latest", "windows-latest"}
+            for f in report.proven
+        ))
+
+    def test_an_incomplete_list_is_contradicted(self):
+        report = verify.check("Tested on ubuntu-latest and macos-latest.", PROFILE)
+        self.assertFalse(report.ok)
+        self.assertEqual(len(report.contradicted), 1)
+        self.assertEqual(report.contradicted[0].conflicts_with, "ci_platforms")
+
+    def test_the_report_names_what_was_left_out(self):
+        report = verify.check("Tested on ubuntu-latest and macos-latest.", PROFILE)
+        finding = report.contradicted[0]
+        missing = set(finding.fact_value) - set(finding.value)
+        self.assertEqual(missing, {"windows-latest"})
+
+    def test_unrelated_names_are_not_a_claim_about_any_fact(self):
+        report = verify.check("Thanks to Alice, Bob and Carol.", PROFILE)
+        self.assertEqual(report.proven, [])
+        self.assertEqual(report.contradicted, [])
+        self.assertEqual(report.unprovable, [])
+
+    def test_a_single_mention_is_a_reference_and_is_left_alone(self):
+        report = verify.check("Built and tested on ubuntu-latest.", PROFILE)
+        self.assertEqual(report.contradicted, [])
+        self.assertEqual(report.proven, [])
+
+
 if __name__ == "__main__":
     unittest.main()

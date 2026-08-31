@@ -216,6 +216,38 @@ def _find_conflicting_fact(claim, facts):
     return None
 
 
+def _mentions(sentence, member):
+    return re.search(r"\b" + re.escape(member) + r"\b", sentence, re.IGNORECASE) is not None
+
+
+def _check_entity_list(text, key, fact):
+    """Findings for one list fact stated (fully or partially) in prose.
+
+    Naming two of three supported platforms is not a smaller truth, it
+    is wrong -- so any sentence naming two or more members is treated
+    as an enumeration and must name all of them. A single mention is a
+    reference, not an enumeration, and is left alone; a sentence naming
+    none of the members isn't a claim about this fact at all.
+    """
+    members = fact["value"]
+    if len(members) < 2:
+        return []
+
+    findings = []
+    for sentence in _split_sentences(text):
+        present = [member for member in members if _mentions(sentence, member)]
+        if len(present) < 2:
+            continue
+        if len(present) == len(members):
+            findings.append(("proven", Finding(present, sentence)))
+        else:
+            findings.append((
+                "contradicted",
+                Finding(present, sentence, conflicts_with=key, fact_value=members, source=fact["source"]),
+            ))
+    return findings
+
+
 def check(text, profile):
     """Classify every claim in `text` against `profile`'s facts."""
     facts = profile.get("facts", {})
@@ -241,5 +273,11 @@ def check(text, profile):
             report.proven.append(Finding(claim.value, claim.context))
         else:
             report.unprovable.append(Finding(claim.value, claim.context))
+
+    for key, fact in facts.items():
+        if not isinstance(fact["value"], list):
+            continue
+        for outcome, finding in _check_entity_list(text, key, fact):
+            getattr(report, outcome).append(finding)
 
     return report
