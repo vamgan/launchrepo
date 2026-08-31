@@ -24,3 +24,49 @@ class Fact:
 
     def as_dict(self):
         return {"value": self.value, "source": self.source}
+
+
+class Profile:
+    """A collection of Facts about one repository, keyed by name.
+
+    Every key is either a recorded Fact or an unavailable reason —
+    never both, and never neither with a value silently missing.
+    Recording None is not a value: it is routed to `unavailable` so
+    a caller can never mistake "we didn't check" for "the answer is
+    nothing."
+    """
+
+    def __init__(self):
+        self._facts = {}
+        self._unavailable = {}
+
+    def record(self, key, value, source):
+        if value is None:
+            self.unavailable(key, f"no value produced by {source}")
+            return
+        self._unavailable.pop(key, None)
+        self._facts[key] = Fact(value, source)
+
+    def unavailable(self, key, reason):
+        self._facts.pop(key, None)
+        self._unavailable[key] = reason
+
+    def value(self, key):
+        fact = self._facts.get(key)
+        return fact.value if fact is not None else None
+
+    def source(self, key):
+        fact = self._facts.get(key)
+        return fact.source if fact is not None else None
+
+    def keys(self):
+        return set(self._facts) | set(self._unavailable)
+
+    def reasons(self):
+        return dict(self._unavailable)
+
+    def as_dict(self):
+        return {
+            "facts": {key: fact.as_dict() for key, fact in self._facts.items()},
+            "unavailable": dict(self._unavailable),
+        }
