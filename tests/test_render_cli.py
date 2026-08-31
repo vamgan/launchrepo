@@ -114,6 +114,51 @@ class TestRenderCLI(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue((result.stdout + result.stderr).strip())
 
+    def test_empty_set_value_exits_nonzero_and_names_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            template = self._write(
+                os.path.join(tmp, "t.html"), "<html><body>{{tagline}}</body></html>"
+            )
+            profile_path = self._write(
+                os.path.join(tmp, "p.json"), json.dumps(PROFILE)
+            )
+            out_path = os.path.join(tmp, "out.png")
+            result = run_cli(
+                template,
+                "--profile", profile_path,
+                "--out", out_path,
+                "--width", "100",
+                "--height", "50",
+                "--set", "tagline=",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            combined = result.stdout + result.stderr
+            self.assertIn("tagline", combined)
+
+    def test_set_value_containing_equals_sign_is_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            template = self._write(
+                os.path.join(tmp, "t.html"), "<html><body>{{install}}</body></html>"
+            )
+            profile_path = self._write(
+                os.path.join(tmp, "p.json"), json.dumps(PROFILE)
+            )
+            out_path = os.path.join(tmp, "out.png")
+            result = run_cli(
+                template,
+                "--profile", profile_path,
+                "--out", out_path,
+                "--width", "100",
+                "--height", "50",
+                "--chrome", BOGUS_CHROME,
+                "--set", "install=a=b",
+            )
+            # Fails on chrome, not on parsing/substitution, proving "a=b"
+            # made it through as one intact value.
+            self.assertNotEqual(result.returncode, 0)
+            combined = (result.stdout + result.stderr).lower()
+            self.assertIn("chrome", combined)
+
 
 if __name__ == "__main__":
     unittest.main()
