@@ -208,26 +208,41 @@ def _expected_value(fact_value):
     return None
 
 
-def _find_conflicting_fact(claim, facts):
-    """A fact whose subject this claim's clause is about, but disagrees with.
+def _related_facts(claim, facts):
+    """Every fact whose subject overlaps this claim's own clause.
 
     Subject overlap is detected by splitting the fact's key on
-    underscores: if any of those words appears in the claim's clause
-    while the claim's value differs from that fact, the claim is
-    contradicted. A coincidental value match to some unrelated fact
-    never overrides a genuine, disagreeing subject match -- callers
-    should check this before falling back to a bare value-membership
-    test for "proven".
+    underscores: a fact is "related" to a claim if any of those words
+    appears in the clause the claim's number sits in. This is the one
+    place both proven and contradicted are decided from -- a number is
+    never judged against a fact its own clause doesn't even mention, in
+    either direction. A coincidental value match to some unrelated fact
+    (say, a claim of "one" thing landing on a contributor_count of 1
+    purely by chance) is not evidence of anything: it is not proof, so
+    it must not be reported as proven.
     """
     clause_words = set(re.findall(r"[a-z0-9]+", _clause_at(claim.context, claim.span).lower()))
+    related = []
     for key, fact in facts.items():
         expected = _expected_value(fact["value"])
         if expected is None:
             continue
         fact_words = set(key.lower().split("_"))
-        if fact_words & clause_words and claim.value != expected:
-            return key, fact
-    return None
+        if fact_words & clause_words:
+            related.append((key, fact, expected))
+    return related
+
+
+def _classify_numeric_claim(claim, facts):
+    """("proven"|"contradicted"|"unprovable", (key, fact) or None)."""
+    related = _related_facts(claim, facts)
+    if not related:
+        return "unprovable", None
+    for key, fact, expected in related:
+        if claim.value == expected:
+            return "proven", (key, fact)
+    key, fact, _expected = related[0]
+    return "contradicted", (key, fact)
 
 
 def _mentions(sentence, member):
@@ -267,15 +282,9 @@ def check(text, profile):
     facts = profile.get("facts", {})
     report = Report()
 
-    match_values = {
-        _expected_value(fact["value"])
-        for fact in facts.values()
-        if _expected_value(fact["value"]) is not None
-    }
-
     for claim in find_claims(text):
-        conflict = _find_conflicting_fact(claim, facts)
-        if conflict is not None:
+        outcome, conflict = _classify_numeric_claim(claim, facts)
+        if outcome == "contradicted":
             key, fact = conflict
             report.contradicted.append(
                 Finding(
@@ -283,7 +292,7 @@ def check(text, profile):
                     conflicts_with=key, fact_value=fact["value"], source=fact["source"],
                 )
             )
-        elif claim.value in match_values:
+        elif outcome == "proven":
             report.proven.append(Finding(claim.value, claim.context))
         else:
             report.unprovable.append(Finding(claim.value, claim.context))
